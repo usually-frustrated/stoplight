@@ -293,6 +293,25 @@ public struct GitHubProvider: CIProvider {
         return login
     }
 
+    /// Submit a review on `commit` (REST: POST /repos/{repo}/pulls/{number}/reviews). `pending` leaves it
+    /// unsubmitted, visible only to me until I submit it on GitHub. GitHub allows one pending review per person per PR.
+    public func postReview(repo: String, number: Int, commit: String, body: String,
+                           comments: [AgentReview.Finding], pending: Bool) async throws {
+        var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(repo)/pulls/\(number)/reviews")!)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("Stoplight/0.1", forHTTPHeaderField: "User-Agent")
+        var json: [String: Any] = ["commit_id": commit, "body": body,
+                                   "comments": comments.map { ["path": $0.path, "line": $0.line, "side": "RIGHT", "body": $0.body] }]
+        if !pending { json["event"] = "COMMENT" }
+        req.httpBody = try JSONSerialization.data(withJSONObject: json)
+        let (_, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw Error.http(-1) }
+        if http.statusCode == 401 { throw Error.unauthorized }
+        guard (200..<300).contains(http.statusCode) else { throw Error.http(http.statusCode) }
+    }
+
     /// Close a pull request without merging it (REST: PATCH /repos/{repo}/pulls/{number}).
     public func closePullRequest(repo: String, number: Int) async throws {
         var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(repo)/pulls/\(number)")!)
@@ -417,6 +436,7 @@ public struct GitHubProvider: CIProvider {
       mergeCommit { ...CommitChecks }
       commits(last: 1) { nodes { commit { ...CommitChecks } } }
       reviews(last: 10) { nodes { databaseId state bodyText submittedAt url author { __typename login } } }
+      pendingReviews: reviews(states: PENDING) { totalCount }
       comments(last: 10) { nodes { databaseId bodyText createdAt url author { __typename login } } }
     }
     \(commitChecksFragment)
@@ -547,6 +567,8 @@ public struct GitHubProvider: CIProvider {
         let mergeCommit: Commit?
         let repository: Repo?
         let reviews: Talks?
+        let pendingReviews: Count?
+        struct Count: Decodable { let totalCount: Int }
         let comments: Talks?
         struct MQ: Decodable { let position: Int?; let state: String? }
         let commits: Commits?
@@ -575,7 +597,8 @@ public struct GitHubProvider: CIProvider {
             mergedAt: n.mergedAt,
             review: ReviewDecision(github: n.reviewDecision),
             activity: activity(of: n),
-            defaultBranch: n.repository?.defaultBranchRef?.name ?? ""
+            defaultBranch: n.repository?.defaultBranchRef?.name ?? "",
+            hasPendingReview: (n.pendingReviews?.totalCount ?? 0) > 0
         )
     }
 

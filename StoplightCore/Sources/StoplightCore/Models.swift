@@ -195,6 +195,8 @@ public struct PullRequest: Codable, Sendable, Hashable, Identifiable {
     public let isLatestMerge: Bool
     /// The repo's default branch ("" when unknown, e.g. an older cache).
     public let defaultBranch: String
+    /// I have an unsubmitted (pending) review on this PR. GitHub only shows a pending review to its author.
+    public let hasPendingReview: Bool
 
     public init(id: String, repo: String, number: Int, title: String, url: URL,
                 isDraft: Bool, updatedAt: Date, headSha: String, checks: [CheckResult],
@@ -203,7 +205,7 @@ public struct PullRequest: Codable, Sendable, Hashable, Identifiable {
                 mergeState: MergeState = .unknown,
                 mergedAt: Date? = nil, note: String? = nil, baseState: CIState? = nil,
                 review: ReviewDecision = .none, activity: [Activity] = [], isLatestMerge: Bool = false,
-                defaultBranch: String = "") {
+                defaultBranch: String = "", hasPendingReview: Bool = false) {
         self.id = id
         self.repo = repo
         self.number = number
@@ -227,6 +229,7 @@ public struct PullRequest: Codable, Sendable, Hashable, Identifiable {
         self.activity = activity
         self.isLatestMerge = isLatestMerge
         self.defaultBranch = defaultBranch
+        self.hasPendingReview = hasPendingReview
     }
 
     // Tolerant decoding so an older prs.json still loads (author/status added in US-011).
@@ -255,6 +258,7 @@ public struct PullRequest: Codable, Sendable, Hashable, Identifiable {
         activity = try c.decodeIfPresent([Activity].self, forKey: .activity) ?? []
         isLatestMerge = try c.decodeIfPresent(Bool.self, forKey: .isLatestMerge) ?? false
         defaultBranch = try c.decodeIfPresent(String.self, forKey: .defaultBranch) ?? ""
+        hasPendingReview = try c.decodeIfPresent(Bool.self, forKey: .hasPendingReview) ?? false
     }
 
     /// Same PR, annotated with how its base branch is doing right now (US-028).
@@ -272,7 +276,7 @@ public struct PullRequest: Codable, Sendable, Hashable, Identifiable {
                     headSha: headSha, checks: checks, author: author, status: status, summary: summary,
                     headRefName: headRefName, baseRefName: baseRefName, mergeQueue: mergeQueue, mergeState: mergeState,
                     mergedAt: mergedAt, note: note, baseState: baseState, review: review, activity: activity,
-                    isLatestMerge: isLatestMerge, defaultBranch: defaultBranch)
+                    isLatestMerge: isLatestMerge, defaultBranch: defaultBranch, hasPendingReview: hasPendingReview)
     }
 
     /// The same PR as a queue row (US-041). A distinct id keeps selection, expansion, pins and
@@ -339,6 +343,8 @@ public struct PullRequest: Codable, Sendable, Hashable, Identifiable {
         }
         return nil
     }
+    /// The Files changed tab, where pending review comments are edited and submitted.
+    public var filesURL: URL { url.appendingPathComponent("files") }
     /// Base looks like a feature branch rather than a trunk.
     public var hasNonTrunkBase: Bool {
         !baseRefName.isEmpty && !["main", "master", "develop", "dev", "trunk", "release"].contains(baseRefName.lowercased())
@@ -360,8 +366,8 @@ public enum PRQuery: Hashable, Sendable {
     case mergedSince(String)
     /// Open PRs targeting a branch (US-030): the release's inbound queue.
     case base(repo: String, branch: String)
-    /// Open PRs asking me for a review, for auto-review.
-    case reviewRequested
+    /// Open PRs asking me for a review. `directOnly` leaves out requests made to a team I'm on.
+    case reviewRequested(directOnly: Bool)
 
     public var githubSearch: String {
         let base = "is:pr is:open archived:false"
@@ -372,7 +378,7 @@ public enum PRQuery: Hashable, Sendable {
         case .org(let o): return "\(base) org:\(o)"
         case .mergedSince(let day): return "is:pr is:merged author:@me merged:>=\(day) sort:updated-desc"
         case .base(let r, let b): return "\(base) repo:\(r) base:\(b)"
-        case .reviewRequested: return "\(base) review-requested:@me"
+        case .reviewRequested(let direct): return "\(base) \(direct ? "user-review-requested" : "review-requested"):@me"
         }
     }
 
