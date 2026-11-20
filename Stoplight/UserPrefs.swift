@@ -120,6 +120,8 @@ final class UserPrefs {
         static let mutedAuthors = "mutedAuthors"
         static let autoReviewCommand = "autoReviewCommand"
         static let autoReviewed = "autoReviewed"
+        static let reviewDirectOnly = "reviewDirectOnly"
+        static let pendingReviews = "pendingReviewRefs"
     }
 
 
@@ -134,6 +136,11 @@ final class UserPrefs {
     var autoReviewCommand: String { didSet { defaults.set(autoReviewCommand, forKey: Key.autoReviewCommand) } }
     /// "<PR id>@<head sha>" already handed to the agent, newest last.
     var autoReviewed: [String] { didSet { defaults.set(autoReviewed, forKey: Key.autoReviewed) } }
+    /// Review requested shows only requests made to me by name, leaving out team requests.
+    var reviewDirectOnly: Bool { didSet { defaults.set(reviewDirectOnly, forKey: Key.reviewDirectOnly) } }
+    /// PRs where auto-review left drafts. Kept in Review requested until the pending review is gone,
+    /// since posting a review can take me off the PR's requested reviewers.
+    var pendingReviews: [PRRef] { didSet { defaults.set(pendingReviews.map(\.key), forKey: Key.pendingReviews) } }
 
     // Appearance. Local only, not synced.
     var housing: Bool { didSet { defaults.set(housing, forKey: Key.housing) } }
@@ -382,6 +389,8 @@ final class UserPrefs {
         ghPath = defaults.string(forKey: Key.ghPath) ?? ""
         autoReviewCommand = defaults.string(forKey: Key.autoReviewCommand) ?? ""
         autoReviewed = defaults.stringArray(forKey: Key.autoReviewed) ?? []
+        reviewDirectOnly = defaults.object(forKey: Key.reviewDirectOnly) as? Bool ?? true
+        pendingReviews = (defaults.stringArray(forKey: Key.pendingReviews) ?? []).compactMap(PRRef.init(key:))
         housing = defaults.bool(forKey: Key.housing)
         colorProfile = defaults.string(forKey: Key.colorProfile).flatMap(ColorProfile.init(rawValue:)) ?? .standard
         // Merged starts collapsed: a one-line count until you ask for it.
