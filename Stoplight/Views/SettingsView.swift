@@ -80,6 +80,18 @@ private struct GeneralTab: View {
                 Text("⌘R, the refresh button in the panel, and Refresh Now in the menu bar icon's menu all refresh straight away.")
             }
 
+            Section {
+                TextField("Agent command", text: $prefs.autoReviewCommand, prompt: Text("Off"))
+                    .font(.system(.callout, design: .monospaced))
+                if prefs.autoReviewCommand.isEmpty {
+                    Button("Use Claude Code") { prefs.autoReviewCommand = AutoReviewer.claudeCommand }
+                }
+            } header: {
+                Text("Auto-review")
+            } footer: {
+                Text("When someone requests your review, Stoplight runs this in your login shell with $STOPLIGHT_PROMPT and $STOPLIGHT_PR_URL set, once per PR commit, one at a time. The default prompt posts a comment review and never approves. Logs go to ~/Library/Logs/Stoplight.")
+            }
+
             Section("Startup") {
                 Toggle("Open Stoplight at login", isOn: $launchAtLogin)
                     .help("Registers Stoplight as a macOS login item. It starts hidden, as a menu bar app.")

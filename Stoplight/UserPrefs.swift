@@ -118,6 +118,8 @@ final class UserPrefs {
         static let notifyActivityOn = "notifyActivityOn"
         static let ignoreBotActivity = "ignoreBotActivity"
         static let mutedAuthors = "mutedAuthors"
+        static let autoReviewCommand = "autoReviewCommand"
+        static let autoReviewed = "autoReviewed"
     }
 
 
@@ -127,6 +129,11 @@ final class UserPrefs {
 
     /// Where `gh` lives, when it isn't somewhere obvious. Empty means "find it automatically".
     var ghPath: String { didSet { defaults.set(ghPath, forKey: Key.ghPath) } }
+
+    /// Shell command that reviews a PR asking for my review, run headless. Empty means auto-review is off.
+    var autoReviewCommand: String { didSet { defaults.set(autoReviewCommand, forKey: Key.autoReviewCommand) } }
+    /// "<PR id>@<head sha>" already handed to the agent, newest last.
+    var autoReviewed: [String] { didSet { defaults.set(autoReviewed, forKey: Key.autoReviewed) } }
 
     // Appearance. Local only, not synced.
     var housing: Bool { didSet { defaults.set(housing, forKey: Key.housing) } }
@@ -373,6 +380,8 @@ final class UserPrefs {
         watched = load(Key.watched).compactMap(PRRef.init(key:))
         pinned = Set(load(Key.pinned))
         ghPath = defaults.string(forKey: Key.ghPath) ?? ""
+        autoReviewCommand = defaults.string(forKey: Key.autoReviewCommand) ?? ""
+        autoReviewed = defaults.stringArray(forKey: Key.autoReviewed) ?? []
         housing = defaults.bool(forKey: Key.housing)
         colorProfile = defaults.string(forKey: Key.colorProfile).flatMap(ColorProfile.init(rawValue:)) ?? .standard
         // Merged starts collapsed: a one-line count until you ask for it.

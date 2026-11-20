@@ -31,6 +31,7 @@ final class AppModel {
     }
 
     let prefs = UserPrefs()
+    @ObservationIgnored private lazy var reviewer = AutoReviewer(prefs: prefs)
 
     /// Raw fetch results, unfiltered.
     private(set) var mine: [PullRequest] = []
@@ -765,7 +766,9 @@ final class AppModel {
             }
             let inboundQueries: [PRQuery] = patterns.compactMap { p in resolvedNow[p.key].map { PRQuery.base(repo: p.repo, branch: $0) } }
 
+            let autoReview = !prefs.autoReviewCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let queries = [PRQuery.authored] + follow + inboundQueries + (mergedQuery.map { [$0] } ?? [])
+                + (autoReview ? [PRQuery.reviewRequested] : [])
             async let searchTask = provider.fetchPullRequests(queries: queries)
             async let watchedTask = provider.fetchPullRequests(refs: refs)
             let (results, freshWatched) = try await (searchTask, watchedTask)
@@ -776,6 +779,7 @@ final class AppModel {
             inbound = Array(zip(inboundQueries, results.dropFirst(cursor).prefix(inboundQueries.count))); cursor += inboundQueries.count
             await rescueVanished(provider, queries: Array(queries.prefix(1 + follow.count + inboundQueries.count)))
             var freshMerged = mergedQuery == nil ? [] : (results.dropFirst(cursor).first ?? [])
+            if autoReview { reviewer.enqueue(results.last ?? []) }
 
             // One branch request covers both: followed branches (US-029) and the base branches behind merges (US-028).
             let baseRefs = freshMerged.filter { !$0.baseRefName.isEmpty }.map { BranchRef(repo: $0.repo, branch: $0.baseRefName) }

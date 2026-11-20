@@ -360,6 +360,8 @@ public enum PRQuery: Hashable, Sendable {
     case mergedSince(String)
     /// Open PRs targeting a branch (US-030): the release's inbound queue.
     case base(repo: String, branch: String)
+    /// Open PRs asking me for a review, for auto-review.
+    case reviewRequested
 
     public var githubSearch: String {
         let base = "is:pr is:open archived:false"
@@ -370,6 +372,7 @@ public enum PRQuery: Hashable, Sendable {
         case .org(let o): return "\(base) org:\(o)"
         case .mergedSince(let day): return "is:pr is:merged author:@me merged:>=\(day) sort:updated-desc"
         case .base(let r, let b): return "\(base) repo:\(r) base:\(b)"
+        case .reviewRequested: return "\(base) review-requested:@me"
         }
     }
 
@@ -382,6 +385,7 @@ public enum PRQuery: Hashable, Sendable {
         case .org(let o): o
         case .mergedSince: "Merged"
         case .base(_, let b): "→ \(b)"
+        case .reviewRequested: "Review requested"
         }
     }
 
