@@ -646,7 +646,12 @@ struct PRRow: View {
         // A pick (⇧-click, to close several) keeps the accent, so it reads as a selection to act on.
         .background(model.picked.contains(pr.id) ? AnyShapeStyle(Color.accentColor.opacity(0.18))
                     : selected ? AnyShapeStyle(.primary.opacity(0.08))
-                    : hovering || expanded ? AnyShapeStyle(.primary.opacity(0.04)) : AnyShapeStyle(.clear))
+                    : hovering || expanded ? AnyShapeStyle(.primary.opacity(0.04))
+                    : pr.hasPendingReview ? AnyShapeStyle(Color.orange.opacity(0.12)) : AnyShapeStyle(.clear))
+        .overlay(alignment: .leading) {
+            // Auto-review drafts wait on me: an orange edge, like an unread marker.
+            if pr.hasPendingReview { Rectangle().fill(Color.orange).frame(width: 3) }
+        }
         .id(pr.id)
         .onHover { hovering = $0 }
         .contextMenu { menu }
@@ -715,6 +720,17 @@ struct PRRow: View {
                         .frame(maxWidth: 150, alignment: .leading) // long stack branches shorten in the middle
                         .help("Stacked on \(pr.baseRefName)")
                 }
+            }
+            if pr.hasPendingReview {
+                Button { NSWorkspace.shared.open(pr.filesURL) } label: {
+                    Label("Review drafts", systemImage: "text.bubble.fill")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(Color.orange.opacity(0.2)))
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+                .help("You have an unsubmitted review here. Opens Files changed, where you edit the drafts and submit.")
             }
             if pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
     }

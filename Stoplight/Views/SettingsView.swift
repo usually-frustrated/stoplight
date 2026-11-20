@@ -86,10 +86,13 @@ private struct GeneralTab: View {
                 if prefs.autoReviewCommand.isEmpty {
                     Button("Use Claude Code") { prefs.autoReviewCommand = AutoReviewer.claudeCommand }
                 }
+                Toggle(isOn: $prefs.reviewDirectOnly) {
+                    InfoLabel("Only requests to me by name", "Leaves out review requests sent to a team you're on.")
+                }
             } header: {
-                Text("Auto-review")
+                Text("Review requested")
             } footer: {
-                Text("When someone requests your review, Stoplight runs this in your login shell with $STOPLIGHT_PROMPT and $STOPLIGHT_PR_URL set, once per PR commit, one at a time. The default prompt posts a comment review and never approves. Logs go to ~/Library/Logs/Stoplight.")
+                Text("PRs asking for your review show at the top of the panel. With an agent command set, Stoplight runs it in your login shell once per PR commit, one at a time, with $STOPLIGHT_PROMPT, $STOPLIGHT_PR_URL and $STOPLIGHT_REVIEW_FILE set. High-confidence findings post as your comment review; the rest wait as a pending review only you can see. Logs go to ~/Library/Logs/Stoplight.")
             }
 
             Section("Startup") {
