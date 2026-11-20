@@ -28,6 +28,16 @@ Core logic tests:
 cd StoplightCore && swift test
 ```
 
+## Review requested and auto-review
+
+PRs that request your review show at the top of the panel. Set an agent command in Settings → General → Review requested, and Stoplight runs it once per PR commit. High-confidence findings post as your comment review. Medium and low ones wait as a pending review, marked orange in the panel, with a button to the Files changed tab.
+
+For Claude Code, install the review skill:
+
+```bash
+cp -r skills/stoplight-review ~/.claude/skills/
+```
+
 ## Diagnostics
 
 While the app runs:

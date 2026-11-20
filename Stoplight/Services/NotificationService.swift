@@ -27,15 +27,18 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func post(_ event: CIEvent) async {
+        await post(title: event.title, body: event.body, url: event.url, thread: event.pr.id, id: event.key, urgent: event.urgent)
+    }
+
+    func post(title: String, body: String, url: URL, thread: String, id: String, urgent: Bool = false) async {
         let content = UNMutableNotificationContent()
-        content.title = event.title
-        content.body = event.body
-        content.userInfo = ["url": event.url.absoluteString]
-        content.threadIdentifier = event.pr.id
-        let urgent = event.urgent
+        content.title = title
+        content.body = body
+        content.userInfo = ["url": url.absoluteString]
+        content.threadIdentifier = thread
         content.sound = urgent ? .default : nil
         content.interruptionLevel = urgent ? .timeSensitive : .active
-        let req = UNNotificationRequest(identifier: event.key, content: content, trigger: nil)
+        let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         try? await center.add(req)
     }
 

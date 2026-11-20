@@ -80,6 +80,21 @@ private struct GeneralTab: View {
                 Text("⌘R, the refresh button in the panel, and Refresh Now in the menu bar icon's menu all refresh straight away.")
             }
 
+            Section {
+                TextField("Agent command", text: $prefs.autoReviewCommand, prompt: Text("Off"))
+                    .font(.system(.callout, design: .monospaced))
+                if prefs.autoReviewCommand.isEmpty {
+                    Button("Use Claude Code") { prefs.autoReviewCommand = AutoReviewer.claudeCommand }
+                }
+                Toggle(isOn: $prefs.reviewDirectOnly) {
+                    InfoLabel("Only requests to me by name", "Leaves out review requests sent to a team you're on.")
+                }
+            } header: {
+                Text("Review requested")
+            } footer: {
+                Text("PRs asking for your review show at the top of the panel. With an agent command set, Stoplight runs it in your login shell once per PR commit, one at a time, with $STOPLIGHT_PROMPT, $STOPLIGHT_PR_URL and $STOPLIGHT_REVIEW_FILE set. High-confidence findings post as your comment review; the rest wait as a pending review only you can see. Logs go to ~/Library/Logs/Stoplight.")
+            }
+
             Section("Startup") {
                 Toggle("Open Stoplight at login", isOn: $launchAtLogin)
                     .help("Registers Stoplight as a macOS login item. It starts hidden, as a menu bar app.")

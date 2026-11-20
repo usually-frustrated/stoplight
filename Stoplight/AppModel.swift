@@ -31,6 +31,11 @@ final class AppModel {
     }
 
     let prefs = UserPrefs()
+    @ObservationIgnored private lazy var reviewer: AutoReviewer = {
+        let r = AutoReviewer(prefs: prefs)
+        r.onFinished = { [weak self] pr, review, logFile in await self?.postAutoReview(pr, review, logFile) }
+        return r
+    }()
 
     /// Raw fetch results, unfiltered.
     private(set) var mine: [PullRequest] = []
@@ -45,6 +50,9 @@ final class AppModel {
     private var resolvedPatterns: [String: String] = [:]
     /// Open PRs targeting each resolved release branch (US-030).
     private(set) var inbound: [(query: PRQuery, prs: [PullRequest])] = []
+    /// PRs asking for my review, plus PRs where auto-review left drafts. Kept out of `all`, like queues:
+    /// other people's CI must not light my dots.
+    private(set) var reviewRequests: [PullRequest] = []
     /// One section per merge queue that a visible PR is sitting in (US-041). Deliberately kept out
     /// of `all`: these are other people's PRs, and they must not light your dots or notify you.
     private(set) var queues: [(ref: BranchRef, prs: [PullRequest])] = []
@@ -516,6 +524,14 @@ final class AppModel {
             picked.forEach { claimed.insert($0.id) }
             return Rollup.sorted(picked)
         }
+        // Review requested sits on top, outside the draggable order; drafts waiting on me come first.
+        let hidden = prefs.sources.hiddenPRs
+        let reviewRows = filter.isEmpty
+            ? Filters.visible(reviewRequests, ignore: prefs.ignoreRules).filter { hidden[$0.id] == nil && matchesSearch($0) }
+            : []
+        reviewRows.forEach { claimed.insert($0.id) }
+        let review = Section(id: "Review", title: "Review requested",
+                             prs: Rollup.sorted(reviewRows.filter(\.hasPendingReview)) + Rollup.sorted(reviewRows.filter { !$0.hasPendingReview }))
         var out: [Section] = []
         out.append(Section(id: "Pinned", title: "Pinned", prs: take(all, pinnedOnly: true)))
         // Only open PRs: every merge, tracked or not, lives in the Merged section.
@@ -532,7 +548,7 @@ final class AppModel {
         let mergedFiltered = filter.isEmpty ? mergedRows.filter { !claimed.contains($0.id) && matchesSearch($0) } : []
         out.append(Section(id: "Merged", title: "Merged", prs: mergedFiltered))
         let labels = prefs.repoLabels
-        return applyOrder(out).filter { !$0.prs.isEmpty }.map { var s = $0; s.repoLabels = labels; return s }
+        return ([review] + applyOrder(out)).filter { !$0.prs.isEmpty }.map { var s = $0; s.repoLabels = labels; return s }
     }
 
     /// All section ids in default order, for drag reordering (includes empty ones so order survives).
@@ -740,9 +756,54 @@ final class AppModel {
         merged = []
         branches = []
         inbound = []
+        reviewRequests = []
         auth = .signedOut
         server.update(Data("{}".utf8))
         WidgetBridge.reload()
+    }
+
+    // MARK: Auto-review
+
+    /// High-confidence findings go up as my comment review; the rest become a pending review only I see.
+    private func postAutoReview(_ pr: PullRequest, _ review: AgentReview?, _ logFile: URL) async {
+        let id = "review:\(pr.id)@\(pr.headSha)", thread = "review:\(pr.id)"
+        let title = "#\(pr.number) \(pr.title)"
+        guard let review else {
+            await notifier.post(title: "Auto-review failed", body: "\(title)\nThe agent wrote no review. Log: \(logFile.path)",
+                                url: logFile, thread: thread, id: id, urgent: true)
+            return
+        }
+        guard let provider else { return }
+        func send(_ findings: [AgentReview.Finding], body: String, pending: Bool) async -> Bool {
+            do {
+                try await provider.postReview(repo: pr.repo, number: pr.number, commit: pr.headSha, body: body, comments: findings, pending: pending)
+                return true
+            } catch GitHubProvider.Error.http(422) where !findings.isEmpty {
+                // A line outside the diff: put the findings in the body. Also 422 when I already have a pending review.
+                return (try? await provider.postReview(repo: pr.repo, number: pr.number, commit: pr.headSha,
+                                                       body: AgentReview.inline(findings, under: body), comments: [], pending: pending)) != nil
+            } catch {
+                return false
+            }
+        }
+        let posted = review.posted, drafts = review.drafts
+        var lines: [String] = []
+        if !posted.isEmpty {
+            lines.append(await send(posted, body: review.summary, pending: false)
+                         ? "\(posted.count) posted" : "Couldn't post \(posted.count) findings")
+        }
+        var draftsSaved = false
+        if !drafts.isEmpty {
+            draftsSaved = await send(drafts, body: posted.isEmpty ? review.summary : "", pending: true)
+            lines.append(draftsSaved ? "\(drafts.count) drafts waiting for you"
+                                     : "Couldn't save \(drafts.count) drafts. You may already have a pending review here.")
+        }
+        if lines.isEmpty { lines.append("No findings. Nothing posted.") }
+        if draftsSaved, let ref = pr.ref, !prefs.pendingReviews.contains(ref) { prefs.pendingReviews.append(ref) }
+        if !draftsSaved && !drafts.isEmpty { lines.append("Log: \(logFile.path)") }
+        await notifier.post(title: "Reviewed \(title)", body: lines.joined(separator: "\n"),
+                            url: draftsSaved ? pr.filesURL : pr.url, thread: thread, id: id, urgent: draftsSaved)
+        if draftsSaved { await refresh() }
     }
 
     // MARK: Fetch (US-002, US-011)
@@ -765,10 +826,20 @@ final class AppModel {
             }
             let inboundQueries: [PRQuery] = patterns.compactMap { p in resolvedNow[p.key].map { PRQuery.base(repo: p.repo, branch: $0) } }
 
+            let autoReview = !prefs.autoReviewCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let queries = [PRQuery.authored] + follow + inboundQueries + (mergedQuery.map { [$0] } ?? [])
+                + [PRQuery.reviewRequested(directOnly: prefs.reviewDirectOnly)]
+            let pendingRefs = prefs.pendingReviews
             async let searchTask = provider.fetchPullRequests(queries: queries)
             async let watchedTask = provider.fetchPullRequests(refs: refs)
+            async let pendingTask = pendingRefs.isEmpty ? [] : provider.fetchPullRequests(refs: pendingRefs)
             let (results, freshWatched) = try await (searchTask, watchedTask)
+            let requested = results.last ?? []
+            let withDrafts = (try? await pendingTask) ?? []
+            reviewRequests = requested + withDrafts.filter { p in p.status == .open && !requested.contains { $0.id == p.id } }
+            // Forget PRs whose drafts I submitted or discarded. Only refs this fetch covered: a draft saved mid-fetch stays.
+            let stillPending = Set(withDrafts.filter(\.hasPendingReview).compactMap(\.ref))
+            prefs.pendingReviews.removeAll { pendingRefs.contains($0) && !stillPending.contains($0) }
             let previous = all
             var cursor = 1
             mine = results.first ?? []
@@ -776,6 +847,7 @@ final class AppModel {
             inbound = Array(zip(inboundQueries, results.dropFirst(cursor).prefix(inboundQueries.count))); cursor += inboundQueries.count
             await rescueVanished(provider, queries: Array(queries.prefix(1 + follow.count + inboundQueries.count)))
             var freshMerged = mergedQuery == nil ? [] : (results.dropFirst(cursor).first ?? [])
+            if autoReview { reviewer.enqueue(requested) }
 
             // One branch request covers both: followed branches (US-029) and the base branches behind merges (US-028).
             let baseRefs = freshMerged.filter { !$0.baseRefName.isEmpty }.map { BranchRef(repo: $0.repo, branch: $0.baseRefName) }
